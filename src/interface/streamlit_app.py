@@ -2023,6 +2023,346 @@ def notebook_regression_analysis(games_df):
                 st.caption(f"📌 A linha vermelha representa a melhor linha reta que se ajusta aos dados (minimiza o erro quadrático).")
                 st.info(f"**Equação da linha:** {model_data['target']} = {simple_model.intercept_:.4f} + {simple_model.coef_[0]:.4f} × {first_feature}")
 
+def logistic_regression_theory_view(games_df):
+    """Interface interativa de Regressão Logística"""
+    st.header("📊 Regressão Logística - Predição com Probabilidades")
+
+    df = games_df.copy()
+
+    # Remover colunas não numéricas
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+    # Remover colunas que podem causar leakage ou não fazem sentido
+    cols_to_exclude = ['data-jogo']
+    available_cols = [col for col in numeric_cols if col not in cols_to_exclude]
+
+    st.markdown("### 🎯 Configuração do Modelo")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### Variável Dependente (Y)")
+        st.info("""
+        **Escolha a variável que deseja prever.**
+
+        Para variáveis contínuas, será criada uma classificação binária baseada em um limiar.
+        """)
+
+        # Opções de variável Y
+        target_options = {
+            'resultado': 'Resultado do Jogo (Vitória/Derrota)',
+            'pontos': 'Pontos (Alto/Baixo)',
+            'assistencias': 'Assistências (Alto/Baixo)',
+            'rebotes-totais': 'Rebotes Totais (Alto/Baixo)',
+            'triplos-convertidos': 'Triplos Convertidos (Alto/Baixo)',
+            'porcentagem-arremessos': 'Porcentagem de Arremessos (Alto/Baixo)'
+        }
+
+        available_targets = {k: v for k, v in target_options.items() if k in available_cols}
+
+        target_var = st.selectbox(
+            "Selecione a Variável Y:",
+            options=list(available_targets.keys()),
+            format_func=lambda x: available_targets[x]
+        )
+
+        # Se não for 'resultado', pedir limiar
+        if target_var != 'resultado':
+            min_val = float(df[target_var].min())
+            max_val = float(df[target_var].max())
+            mean_val = float(df[target_var].mean())
+
+            threshold = st.slider(
+                f"Limiar para classificação de {target_options[target_var]}:",
+                min_value=min_val,
+                max_value=max_val,
+                value=mean_val,
+                help=f"Valores acima do limiar serão classificados como 1 (Alto), abaixo como 0 (Baixo)"
+            )
+            df['target'] = (df[target_var] > threshold).astype(int)
+        else:
+            df['target'] = df['resultado']
+
+    with col2:
+        st.markdown("#### Variáveis Independentes (X)")
+        st.info("""
+        **Escolha as variáveis que deseja usar para fazer a predição.**
+
+        Selecione uma ou mais variáveis da base de dados.
+        """)
+
+        # Variáveis disponíveis para X (excluir a target)
+        available_features = [col for col in available_cols if col != target_var]
+
+        # Nomes mais amigáveis
+        feature_labels = {
+            'arremessos-tentados': 'Arremessos Tentados',
+            'arremessos-convertidos': 'Arremessos Convertidos',
+            'porcentagem-arremessos': 'Porcentagem de Arremessos',
+            'triplos-tentados': 'Triplos Tentados',
+            'triplos-convertidos': 'Triplos Convertidos',
+            'porcentagem-triplos': 'Porcentagem de Triplos',
+            'lances-livres-tentados': 'Lances Livres Tentados',
+            'lances-livres-convertidos': 'Lances Livres Convertidos',
+            'porcentagem-lances-livres': 'Porcentagem de Lances Livres',
+            'rebotes-totais': 'Rebotes Totais',
+            'rebotes-ofensivos': 'Rebotes Ofensivos',
+            'rebotes-defensivos': 'Rebotes Defensivos',
+            'assistencias': 'Assistências',
+            'roubos': 'Roubos de Bola',
+            'tocos': 'Tocos',
+            'erros': 'Erros',
+            'faltas': 'Faltas',
+            'pontos': 'Pontos',
+            'saldo-pontos': 'Saldo de Pontos',
+            'mando-de-jogo': 'Mando de Jogo (Casa/Fora)'
+        }
+
+        selected_features = st.multiselect(
+            "Selecione as Variáveis X:",
+            options=available_features,
+            default=available_features[:4] if len(available_features) >= 4 else available_features,
+            format_func=lambda x: feature_labels.get(x, x)
+        )
+
+    if not selected_features:
+        st.warning("⚠️ Selecione pelo menos uma variável independente (X) para treinar o modelo.")
+        return
+
+    st.markdown("---")
+
+    # --- TREINAR MODELO ---
+    try:
+        # Preparar dados
+        X = df[selected_features].dropna()
+        y = df.loc[X.index, 'target']
+
+        if len(X) < 10:
+            st.warning("⚠️ Dados insuficientes para treinar o modelo. Selecione outras variáveis.")
+            return
+
+        # Normalizar dados
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        # Dividir em treino e teste
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_scaled, y, test_size=0.3, random_state=42
+        )
+
+        # Treinar modelo
+        model = LogisticRegression(max_iter=1000, random_state=42)
+        model.fit(X_train, y_train)
+
+        # Fazer predições
+        y_pred = model.predict(X_test)
+        y_pred_proba = model.predict_proba(X_test)
+
+        # Calcular métricas
+        accuracy = accuracy_score(y_test, y_pred)
+        cm = confusion_matrix(y_test, y_pred)
+
+        # --- EXIBIR RESULTADOS ---
+        st.markdown("### 📊 Resultados do Modelo")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Acurácia", f"{accuracy:.1%}")
+
+        with col2:
+            correct = cm[0][0] + cm[1][1] if len(cm) > 1 else cm[0][0]
+            total = len(y_test)
+            st.metric("Predições Corretas", f"{correct}/{total}")
+
+        with col3:
+            class_1_count = y.sum()
+            st.metric("Classe 1 (Alto/Vitória)", f"{class_1_count}")
+
+        with col4:
+            class_0_count = len(y) - class_1_count
+            st.metric("Classe 0 (Baixo/Derrota)", f"{class_0_count}")
+
+        # Coeficientes
+        st.markdown("### 🔢 Equação do Modelo")
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.markdown(f"**Intercepto (β₀):** {model.intercept_[0]:.4f}")
+
+            coef_df = pd.DataFrame({
+                'Variável': [feature_labels.get(f, f) for f in selected_features],
+                'Coeficiente': model.coef_[0]
+            }).sort_values('Coeficiente', ascending=False)
+
+            st.dataframe(coef_df, use_container_width=True, hide_index=True)
+
+        with col2:
+            fig_coef = px.bar(
+                coef_df,
+                x='Coeficiente',
+                y='Variável',
+                orientation='h',
+                title='Importância das Variáveis',
+                color='Coeficiente',
+                color_continuous_scale='RdYlGn'
+            )
+            fig_coef.update_layout(height=400, showlegend=False)
+            st.plotly_chart(fig_coef, use_container_width=True)
+
+        # Equação
+        st.markdown("**Equação Completa:**")
+
+        # Criar equação com quebras de linha para variáveis longas
+        equation_text = f"**z** = {model.intercept_[0]:.4f}"
+        for i, feature in enumerate(selected_features):
+            coef = model.coef_[0][i]
+            sign = "+" if coef >= 0 else ""
+            feature_name = feature_labels.get(feature, feature)
+            equation_text += f" {sign} {abs(coef):.4f} × {feature_name}"
+
+        st.markdown(equation_text)
+        st.markdown("**p(Classe 1)** = 1 / [1 + e^(-z)]")
+
+        # --- EXEMPLO DE CÁLCULO ---
+        st.markdown("---")
+        st.markdown("**📝 Exemplo de Cálculo:**")
+
+        # Pegar um exemplo real dos dados de teste
+        if len(X_test) > 0:
+            example_idx = 0
+            example_values = X.iloc[example_idx]
+            example_scaled = scaler.transform([example_values.values])[0]
+
+            # Calcular z manualmente
+            z_value = model.intercept_[0]
+            for i, feature in enumerate(selected_features):
+                z_value += model.coef_[0][i] * example_scaled[i]
+
+            # Calcular p
+            p_value = 1 / (1 + np.exp(-z_value))
+
+            # Mostrar valores originais
+            st.markdown("Para os seguintes valores:")
+            values_text = ""
+            for feature in selected_features:
+                feature_name = feature_labels.get(feature, feature)
+                values_text += f"- **{feature_name}**: {example_values[feature]:.2f}\n"
+            st.markdown(values_text)
+
+            # Mostrar cálculo
+            st.markdown(f"Calculamos **z** = {z_value:.4f}")
+            st.markdown(f"E então **p(Classe 1)** = 1 / [1 + e^(-{z_value:.4f})] = **{p_value:.4f}** ({p_value*100:.2f}%)")
+
+            if p_value > 0.5:
+                st.success(f"✅ Neste exemplo, o modelo prevê **Classe 1** (probabilidade > 50%)")
+            else:
+                st.info(f"ℹ️ Neste exemplo, o modelo prevê **Classe 0** (probabilidade < 50%)")
+
+        # --- FAZER PREDIÇÃO ---
+        st.markdown("---")
+        st.markdown("### 🎯 Fazer Predição Personalizada")
+
+        st.info("Insira os valores das variáveis para calcular a probabilidade:")
+
+        prediction_values = {}
+
+        cols = st.columns(3)
+        for i, feature in enumerate(selected_features):
+            with cols[i % 3]:
+                mean_val = float(X[feature].mean())
+                min_val = float(X[feature].min())
+                max_val = float(X[feature].max())
+
+                prediction_values[feature] = st.number_input(
+                    feature_labels.get(feature, feature),
+                    min_value=min_val,
+                    max_value=max_val,
+                    value=mean_val,
+                    key=f"pred_{feature}",
+                    help=f"Média: {mean_val:.2f}"
+                )
+
+        if st.button("🔮 Calcular Probabilidade", type="primary"):
+            # Fazer predição
+            pred_input = np.array([list(prediction_values.values())])
+            pred_input_scaled = scaler.transform(pred_input)
+
+            prediction = model.predict(pred_input_scaled)[0]
+            probability = model.predict_proba(pred_input_scaled)[0]
+
+            prob_class_0 = probability[0]
+            prob_class_1 = probability[1]
+
+            # Exibir resultado
+            st.markdown("---")
+            st.markdown("### 📈 Resultado da Predição")
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric(
+                    "Probabilidade Classe 0 (Baixo/Derrota)",
+                    f"{prob_class_0:.1%}"
+                )
+
+            with col2:
+                st.metric(
+                    "Probabilidade Classe 1 (Alto/Vitória)",
+                    f"{prob_class_1:.1%}"
+                )
+
+            with col3:
+                result_text = "Classe 1 (Alto/Vitória)" if prediction == 1 else "Classe 0 (Baixo/Derrota)"
+                st.metric("Predição Final", result_text)
+
+            if prob_class_1 > 0.5:
+                st.success(f"✅ O modelo prevê **Classe 1** com {prob_class_1:.1%} de probabilidade")
+            else:
+                st.info(f"ℹ️ O modelo prevê **Classe 0** com {prob_class_0:.1%} de probabilidade")
+
+        # --- VISUALIZAÇÕES ---
+        st.markdown("---")
+        st.markdown("### 📊 Visualizações")
+
+        tab1, tab2 = st.tabs(["Matriz de Confusão", "Distribuição de Probabilidades"])
+
+        with tab1:
+            fig_cm = px.imshow(
+                cm,
+                labels=dict(x="Predito", y="Real", color="Contagem"),
+                x=['Classe 0', 'Classe 1'],
+                y=['Classe 0', 'Classe 1'],
+                text_auto=True,
+                color_continuous_scale='Blues'
+            )
+            fig_cm.update_layout(height=400)
+            st.plotly_chart(fig_cm, use_container_width=True)
+
+        with tab2:
+            prob_df = pd.DataFrame({
+                'Probabilidade Classe 1': y_pred_proba[:, 1],
+                'Classe Real': y_test.map({0: 'Classe 0', 1: 'Classe 1'})
+            })
+
+            fig_prob = px.histogram(
+                prob_df,
+                x='Probabilidade Classe 1',
+                color='Classe Real',
+                nbins=20,
+                title='Distribuição de Probabilidades por Classe Real',
+                labels={'Probabilidade Classe 1': 'Probabilidade de Classe 1'},
+                barmode='overlay',
+                opacity=0.7
+            )
+            fig_prob.update_layout(height=400)
+            st.plotly_chart(fig_prob, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Erro ao treinar o modelo: {e}")
+        st.exception(e)
+
 def main():
     """Função principal da aplicação"""
     st.title("🏀 Dallas Mavericks 2024-25")
@@ -2038,13 +2378,14 @@ def main():
 
     st.markdown("---")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "👥 Jogadores",
         "🏀 Jogos",
         "🧠 Análise Avançada",
         "🔍 Interativa",
         "🎯 Predições Específicas",
-        "📈 Regressão Linear"
+        "📈 Regressão Linear",
+        "📊 Regressão Logística"
     ])
 
     with tab1:
@@ -2064,6 +2405,9 @@ def main():
 
     with tab6:
         notebook_regression_analysis(games_df)
+
+    with tab7:
+        logistic_regression_theory_view(games_df)
     
     st.markdown("---")
     st.markdown(
