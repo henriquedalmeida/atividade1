@@ -1049,6 +1049,10 @@ def player_specific_predictions(players_df):
         st.warning("Não há jogadores com dados suficientes para predição.")
         return
     
+    # Inicializar session state se necessário
+    if 'selected_player_idx' not in st.session_state:
+        st.session_state.selected_player_idx = None
+    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -1064,19 +1068,35 @@ def player_specific_predictions(players_df):
             
             player_options[player_name] = idx
         
+        # Usar uma chave única para o selectbox
         selected_player_name = st.selectbox(
             "Selecione o Jogador:",
             options=list(player_options.keys()),
-            help="Escolha o jogador para fazer a predição"
+            help="Escolha o jogador para fazer a predição",
+            key="player_selector"
         )
         
-        selected_player_idx = player_options[selected_player_name]
-        player_data = active_players.loc[selected_player_idx]
+        # Verificar se o jogador selecionado ainda existe nos dados
+        if selected_player_name in player_options:
+            selected_player_idx = player_options[selected_player_name]
+            
+            # Verificar se o índice existe no DataFrame
+            if selected_player_idx in active_players.index:
+                player_data = active_players.loc[selected_player_idx]
+                # Atualizar session state
+                st.session_state.selected_player_idx = selected_player_idx
+            else:
+                st.error("Erro: Jogador selecionado não encontrado nos dados.")
+                return
+        else:
+            st.error("Erro: Jogador selecionado inválido.")
+            return
         
         stat_type = st.selectbox(
             "O que queremos prever?",
             ["Pontos", "Rebotes", "Assistências"],
-            help="Escolha a estatística que quer prever"
+            help="Escolha a estatística que quer prever",
+            key="stat_type_selector"
         )
         
         if stat_type == "Pontos":
@@ -1085,8 +1105,9 @@ def player_specific_predictions(players_df):
                 f"Quantos {stat_type.lower()} o jogador fará?",
                 min_value=0,
                 max_value=100,
-                value=int(current_avg),
-                help=f"Média atual: {current_avg:.1f} por jogo"
+                value=max(0, min(100, int(current_avg))),
+                help=f"Média atual: {current_avg:.1f} por jogo",
+                key=f"points_input_{selected_player_idx}"
             )
             stat_column = 'pontos_media'
         elif stat_type == "Rebotes":
@@ -1095,8 +1116,9 @@ def player_specific_predictions(players_df):
                 f"Quantos {stat_type.lower()} o jogador fará?",
                 min_value=0,
                 max_value=30,
-                value=int(current_avg),
-                help=f"Média atual: {current_avg:.1f} por jogo"
+                value=max(0, min(30, int(current_avg))),
+                help=f"Média atual: {current_avg:.1f} por jogo",
+                key=f"rebounds_input_{selected_player_idx}"
             )
             stat_column = 'rebotes-totais_media'
         else:
@@ -1105,8 +1127,9 @@ def player_specific_predictions(players_df):
                 f"Quantas {stat_type.lower()} o jogador fará?",
                 min_value=0,
                 max_value=20,
-                value=int(current_avg),
-                help=f"Média atual: {current_avg:.1f} por jogo"
+                value=max(0, min(20, int(current_avg))),
+                help=f"Média atual: {current_avg:.1f} por jogo",
+                key=f"assists_input_{selected_player_idx}"
             )
             stat_column = 'assistencias_media'
     
@@ -1140,7 +1163,7 @@ def player_specific_predictions(players_df):
         })
         st.dataframe(player_info_df, use_container_width=True)
     
-    if st.button("🔮 Fazer Predição", type="primary"):
+    if st.button("🔮 Fazer Predição", type="primary", key=f"predict_button_{selected_player_idx}_{stat_type}"):
         make_player_prediction(active_players, selected_player_idx, stat_column, target_value, stat_type)
 
 def make_player_prediction(players_df, player_idx, stat_column, target_value, stat_type):
@@ -1166,21 +1189,71 @@ def make_player_prediction(players_df, player_idx, stat_column, target_value, st
     player_features = players_df.loc[player_idx, available_features].values.reshape(1, -1)
 
     predicted_per_game = model.predict(player_features)[0]
-    games_played = players_df.loc[player_idx, 'jogos-disputados_total']
+    player_data = players_df.loc[player_idx]
     
-    similar_players = players_df[
-        (abs(players_df['idade'] - players_df.loc[player_idx, 'idade']) <= 3) &
-        (abs(players_df['posicao-g-f-fc-cf-c'] - players_df.loc[player_idx, 'posicao-g-f-fc-cf-c']) <= 1)
+    probability = 50
+
+    diff_from_prediction = abs(target_value - predicted_per_game)
+    if diff_from_prediction <= 1:
+        probability += 30
+    elif diff_from_prediction <= 2:
+        probability += 20
+    elif diff_from_prediction <= 3:
+        probability += 10
+    elif diff_from_prediction <= 5:
+        probability -= 10
+    else:
+        probability -= 20
+    
+    similar_position = players_df[
+        players_df['posicao-g-f-fc-cf-c'] == player_data['posicao-g-f-fc-cf-c']
     ]
     
-    if len(similar_players) > 3:
-        similar_avg = similar_players[stat_column].mean()
-        target_per_game = target_value
-
-        diff_from_avg = abs(target_per_game - similar_avg)
-        probability = max(0, min(100, 100 - (diff_from_avg * 10)))
-    else:
-        probability = 50 
+    if len(similar_position) > 1:
+        position_avg = similar_position[stat_column].mean()
+        position_std = similar_position[stat_column].std()
+        
+        if position_std > 0:
+            z_score = abs(target_value - position_avg) / position_std
+            if z_score <= 1:
+                probability += 15  
+            elif z_score <= 2:
+                probability += 5  
+            else:
+                probability -= 15  
+    
+    current_avg = player_data[stat_column]
+    trend_factor = abs(target_value - current_avg) / (current_avg + 0.1) 
+    
+    if trend_factor <= 0.1: 
+        probability += 20
+    elif trend_factor <= 0.2: 
+        probability += 10
+    elif trend_factor <= 0.5: 
+        probability -= 5
+    else:  
+        probability -= 15
+    
+    if player_data['jogos-disputados_total'] >= 20:
+        probability += 5  
+    elif player_data['jogos-disputados_total'] <= 5:
+        probability -= 10  
+    
+    if stat_type == "Pontos":
+        if 'porcentagem-arremessos_media' in player_data:
+            shoot_pct = player_data['porcentagem-arremessos_media']
+            if shoot_pct > 0.5:  
+                probability += 5
+            elif shoot_pct < 0.4:
+                probability -= 5
+    elif stat_type == "Rebotes":
+        if player_data['posicao-g-f-fc-cf-c'] >= 4:  
+            probability += 5
+    elif stat_type == "Assistências":
+        if player_data['posicao-g-f-fc-cf-c'] <= 2:  
+            probability += 5
+    
+    probability = max(5, min(95, probability)) 
 
     st.markdown("---")
     st.subheader("🎯 Resultado da Predição")
@@ -1218,6 +1291,30 @@ def make_player_prediction(players_df, player_idx, stat_column, target_value, st
         interpretation = "🚨 **Baixa probabilidade.** A meta é muito ambiciosa para o perfil atual do jogador."
     
     st.markdown(f"**Interpretação:** {interpretation}")
+    
+    with st.expander("🔍 Ver detalhes do cálculo da probabilidade"):
+        st.markdown("**Fatores considerados no cálculo:**")
+        st.markdown(f"• **Predição do modelo:** {predicted_per_game:.1f} {stat_type.lower()}/jogo")
+        st.markdown(f"• **Meta desejada:** {target_value} {stat_type.lower()}/jogo")
+        st.markdown(f"• **Diferença:** {abs(target_value - predicted_per_game):.1f}")
+        st.markdown(f"• **Média atual do jogador:** {player_data[stat_column]:.1f} {stat_type.lower()}/jogo")
+        st.markdown(f"• **Jogos disputados:** {player_data['jogos-disputados_total']}")
+        st.markdown(f"• **Posição:** {player_data['posicao-g-f-fc-cf-c']}")
+        
+        similar_position = players_df[
+            players_df['posicao-g-f-fc-cf-c'] == player_data['posicao-g-f-fc-cf-c']
+        ]
+        if len(similar_position) > 1:
+            position_avg = similar_position[stat_column].mean()
+            st.markdown(f"• **Média da posição:** {position_avg:.1f} {stat_type.lower()}/jogo")
+            st.markdown(f"• **Diferença da posição:** {abs(target_value - position_avg):.1f}")
+        
+        st.markdown("**Probabilidade calculada dinamicamente baseada em:**")
+        st.markdown("- Proximidade da predição do modelo")
+        st.markdown("- Comparação com jogadores da mesma posição")
+        st.markdown("- Tendência histórica do jogador")
+        st.markdown("- Experiência (jogos disputados)")
+        st.markdown("- Características específicas da estatística")
 
 def team_specific_predictions(games_df):
     """Predições específicas para o time"""
@@ -1229,7 +1326,8 @@ def team_specific_predictions(games_df):
         team_stat = st.selectbox(
             "O que queremos prever para o time?",
             ["Pontos", "Rebotes", "Assistências"],
-            help="Escolha a estatística do time que quer prever"
+            help="Escolha a estatística do time que quer prever",
+            key="team_stat_selector"
         )
         
         if team_stat == "Pontos":
@@ -1239,7 +1337,8 @@ def team_specific_predictions(games_df):
                 min_value=60,
                 max_value=150,
                 value=int(current_avg),
-                help=f"Média atual: {current_avg:.1f} por jogo"
+                help=f"Média atual: {current_avg:.1f} por jogo",
+                key="team_points_input"
             )
             stat_column = 'pontos'
         elif team_stat == "Rebotes":
@@ -1249,7 +1348,8 @@ def team_specific_predictions(games_df):
                 min_value=20,
                 max_value=80,
                 value=int(current_avg),
-                help=f"Média atual: {current_avg:.1f} por jogo"
+                help=f"Média atual: {current_avg:.1f} por jogo",
+                key="team_rebounds_input"
             )
             stat_column = 'rebotes-totais'
         else: 
@@ -1259,14 +1359,16 @@ def team_specific_predictions(games_df):
                 min_value=10,
                 max_value=40,
                 value=int(current_avg),
-                help=f"Média atual: {current_avg:.1f} por jogo"
+                help=f"Média atual: {current_avg:.1f} por jogo",
+                key="team_assists_input"
             )
             stat_column = 'assistencias'
         
         game_context = st.selectbox(
             "Contexto do jogo:",
             ["Casa", "Fora"],
-            help="O time joga em casa ou fora?"
+            help="O time joga em casa ou fora?",
+            key="game_context_selector"
         )
     
     with col2:
@@ -1286,7 +1388,7 @@ def team_specific_predictions(games_df):
         for stat_name, stat_value in team_stats.items():
             st.metric(stat_name, stat_value)
     
-    if st.button("🔮 Fazer Predição do Time", type="primary"):
+    if st.button("🔮 Fazer Predição do Time", type="primary", key=f"team_predict_button_{team_stat}_{game_context}"):
         make_team_prediction(games_df, stat_column, target_value, team_stat, game_context)
 
 def make_team_prediction(games_df, stat_column, target_value, stat_type, game_context):
@@ -1300,25 +1402,84 @@ def make_team_prediction(games_df, stat_column, target_value, stat_type, game_co
     
     context_avg = context_games[stat_column].mean()
     context_std = context_games[stat_column].std()
+    overall_avg = games_df[stat_column].mean()
+    overall_std = games_df[stat_column].std()
+    
+    probability = 50
     
     if context_std > 0:
         z_score = abs(target_value - context_avg) / context_std
-        if z_score <= 1:
-            probability = 68
+        if z_score <= 0.5:
+            probability += 25 
+        elif z_score <= 1:
+            probability += 15  
+        elif z_score <= 1.5:
+            probability += 5  
         elif z_score <= 2:
-            probability = 32
+            probability -= 10 
         else:
-            probability = 5
-    else:
-        probability = 50
+            probability -= 25  
     
     recent_games = games_df.tail(5)
-    recent_avg = recent_games[stat_column].mean()
+    if len(recent_games) >= 3:
+        recent_avg = recent_games[stat_column].mean()
+        recent_context = recent_games[recent_games['mando-de-jogo'] == context_value]
+        
+        if len(recent_context) >= 2:
+            recent_context_avg = recent_context[stat_column].mean()
+            if abs(target_value - recent_context_avg) < abs(target_value - context_avg):
+                probability += 10
+        
+        if abs(target_value - recent_avg) <= overall_std:
+            probability += 5
     
-    if abs(target_value - recent_avg) < abs(target_value - context_avg):
-        probability += 10  # Bonus se está mais próximo da tendência recente
+    home_games = games_df[games_df['mando-de-jogo'] == 1]
+    away_games = games_df[games_df['mando-de-jogo'] == 0]
     
-    probability = min(95, max(5, probability))  # Limitar entre 5% e 95%
+    if len(home_games) >= 3 and len(away_games) >= 3:
+        home_avg = home_games[stat_column].mean()
+        away_avg = away_games[stat_column].mean()
+        
+        if game_context == "Casa" and home_avg > away_avg:
+            probability += 8 
+        elif game_context == "Fora" and away_avg > home_avg:
+            probability += 8  
+        elif game_context == "Casa" and home_avg < away_avg:
+            probability -= 5
+        elif game_context == "Fora" and away_avg < home_avg:
+            probability -= 5 
+    
+    if overall_std > 0:
+        coefficient_variation = overall_std / overall_avg
+        if coefficient_variation < 0.15:
+            probability += 10
+        elif coefficient_variation > 0.30:
+            probability -= 8
+    
+    if stat_type == "Pontos":
+        avg_fg_pct = games_df['porcentagem-arremessos'].mean()
+        if avg_fg_pct > 0.47: 
+            probability += 5
+        elif avg_fg_pct < 0.42:
+            probability -= 5
+            
+    elif stat_type == "Rebotes":
+        context_reb_avg = context_games['rebotes-totais'].mean() if 'rebotes-totais' in context_games.columns else 0
+        if target_value <= context_reb_avg * 1.1:  # Meta dentro de 10% da média
+            probability += 8
+            
+    elif stat_type == "Assistências":
+        context_ast_avg = context_games['assistencias'].mean()
+        if target_value >= context_ast_avg * 0.9: 
+            probability += 5
+    
+    total_games = len(games_df)
+    if total_games >= 20:
+        probability += 3  
+    elif total_games <= 5:
+        probability -= 5  
+    
+    probability = max(5, min(95, probability))
     
     st.markdown("---")
     st.subheader("🎯 Resultado da Predição do Time")
@@ -1357,6 +1518,38 @@ def make_team_prediction(games_df, stat_column, target_value, stat_type, game_co
     
     st.markdown(f"**Interpretação:** {interpretation}")
     
+    with st.expander("🔍 Ver detalhes do cálculo da probabilidade"):
+        st.markdown("**Estatísticas utilizadas no cálculo:**")
+        st.markdown(f"• **Média {game_context.lower()}:** {context_avg:.1f} {stat_type.lower()}/jogo")
+        if context_std > 0:
+            z_score = abs(target_value - context_avg) / context_std
+            st.markdown(f"• **Desvio padrão {game_context.lower()}:** {context_std:.1f}")
+            st.markdown(f"• **Z-score:** {z_score:.2f} (quantos desvios da média)")
+        
+        overall_avg = games_df[stat_column].mean()
+        st.markdown(f"• **Média geral:** {overall_avg:.1f} {stat_type.lower()}/jogo")
+        
+        recent_games = games_df.tail(5)
+        if len(recent_games) >= 3:
+            recent_avg = recent_games[stat_column].mean()
+            st.markdown(f"• **Média últimos 5 jogos:** {recent_avg:.1f} {stat_type.lower()}/jogo")
+        
+        st.markdown(f"• **Total de jogos analisados:** {len(games_df)}")
+        st.markdown(f"• **Jogos no contexto {game_context.lower()}:** {len(context_games)}")
+        
+        home_avg = games_df[games_df['mando-de-jogo'] == 1][stat_column].mean()
+        away_avg = games_df[games_df['mando-de-jogo'] == 0][stat_column].mean()
+        st.markdown(f"• **Média em casa:** {home_avg:.1f} {stat_type.lower()}/jogo")
+        st.markdown(f"• **Média fora:** {away_avg:.1f} {stat_type.lower()}/jogo")
+        
+        st.markdown("**Fatores considerados no cálculo:**")
+        st.markdown("- Proximidade da meta em relação à média histórica")
+        st.markdown("- Tendência recente dos últimos jogos")
+        st.markdown("- Performance histórica em casa vs fora")
+        st.markdown("- Consistência da equipe (variabilidade)")
+        st.markdown("- Características específicas da estatística")
+        st.markdown("- Quantidade de dados históricos disponíveis")
+    
     st.subheader("💡 Fatores que Podem Influenciar")
     
     factors_col1, factors_col2 = st.columns(2)
@@ -1379,7 +1572,6 @@ def notebook_regression_analysis(games_df):
     """Análise de Regressão Linear baseada no notebook linear_regression_att.ipynb"""
     st.header("📈 Análise de Regressão Linear - Equação 1")
     st.write("")
-    st.markdown("**Baseado no notebook linear_regression_att.ipynb**")
 
 
     if 'notebook_model' in st.session_state:
@@ -2425,7 +2617,7 @@ def main():
     st.markdown("---")
     st.markdown(
         """
-        <div style='text-align: center; color: #666; font-size: 0.8em;'>
+        <div style='text-align: center; font-size: 0.8em;'>
             <p>📊 Dashboard desenvolvido para análise exploratória dos dados dos Dallas Mavericks</p>
             <p>Temporada 2024-25 • Dados processados e limpos automaticamente</p>
         </div>
