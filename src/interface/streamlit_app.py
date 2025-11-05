@@ -441,29 +441,8 @@ def interactive_analysis(players_df, games_df):
     """Análise interativa com filtros"""
     st.header("🔍 Análise Interativa")
     
-    st.sidebar.header("🎛️ Filtros")
-    
-    min_minutes = st.sidebar.slider(
-        "Minutos mínimos totais",
-        min_value=0,
-        max_value=int(players_df['minutos_total'].max()),
-        value=500,
-        step=50
-    )
-    
-    positions = sorted(players_df['posicao-g-f-fc-cf-c'].unique())
-    position_names = {1: 'G', 2: 'F', 3: 'FC', 4: 'CF', 5: 'C'}
-    selected_positions = st.sidebar.multiselect(
-        "Posições", 
-        options=positions,
-        default=positions,
-        format_func=lambda x: position_names.get(x, f"Posição {x}")
-    )
-    
-    filtered_players = players_df[
-        (players_df['minutos_total'] >= min_minutes) &
-        (players_df['posicao-g-f-fc-cf-c'].isin(selected_positions))
-    ]
+    # Os filtros agora são globais na sidebar
+    filtered_players = players_df  # Já vem filtrado da função main
     
     st.write("")
     
@@ -2588,7 +2567,40 @@ def main():
         st.error("Não foi possível carregar os dados. Verifique se os arquivos estão no local correto.")
         return
 
-    create_summary_metrics(players_df, games_df)
+    st.sidebar.header("🎛️ Filtros Globais")
+    
+    min_minutes = st.sidebar.slider(
+        "Minutos mínimos totais",
+        min_value=0,
+        max_value=int(players_df['minutos_total'].max()),
+        value=0,
+        step=50,
+        help="Filtrar jogadores por minutos mínimos jogados na temporada"
+    )
+    
+    positions = sorted(players_df['posicao-g-f-fc-cf-c'].unique())
+    position_names = {1: 'G', 2: 'F', 3: 'FC', 4: 'CF', 5: 'C'}
+    selected_positions = st.sidebar.multiselect(
+        "Posições", 
+        options=positions,
+        default=positions,
+        format_func=lambda x: position_names.get(x, f"Posição {x}"),
+        help="Selecionar posições para análise"
+    )
+    
+    filtered_players = players_df[
+        (players_df['minutos_total'] >= min_minutes) &
+        (players_df['posicao-g-f-fc-cf-c'].isin(selected_positions))
+    ]
+    
+    st.sidebar.markdown("---")
+    st.sidebar.write(f"**Jogadores selecionados:** {len(filtered_players)}/{len(players_df)}")
+
+    if len(filtered_players) == 0:
+        st.warning("⚠️ Nenhum jogador atende aos critérios selecionados. Ajuste os filtros na sidebar.")
+        return
+
+    create_summary_metrics(filtered_players, games_df)
 
     st.markdown("---")
 
@@ -2603,19 +2615,19 @@ def main():
     ])
 
     with tab1:
-        player_analysis(players_df)
+        player_analysis(filtered_players)
 
     with tab2:
         game_analysis(games_df)
 
     with tab3:
-        advanced_analysis(players_df, games_df)
+        advanced_analysis(filtered_players, games_df)
 
     with tab4:
-        interactive_analysis(players_df, games_df)
+        interactive_analysis(filtered_players, games_df)
 
     with tab5:
-        prediction_interface(players_df, games_df)
+        prediction_interface(filtered_players, games_df)
 
     with tab6:
         notebook_regression_analysis(games_df)
