@@ -128,7 +128,7 @@ def add_player_names(processed_df, original_df):
                 if len(matching_player) >= 1:
                     processed_with_names.at[idx, 'nome-jogador'] = matching_player.iloc[0]['PLAYER_NAME']
                 else:
-                    position_name = {1: 'Guard', 2: 'Forward', 3: 'Center', 4: 'Forward-Center', 5: 'Center-Forward'}
+                    position_name = {1: 'Guard', 2: 'Forward', 3: 'Forward-Center', 4: 'Center-Forward', 5: 'Center'}
                     pos = position_name.get(row.get('posicao-g-f-fc-cf-c', 0), 'Player')
                     processed_with_names.at[idx, 'nome-jogador'] = f"{pos} #{idx+1}"
 
@@ -216,13 +216,15 @@ def player_analysis(players_df):
     
     with col1:
         pos_counts = players_df['posicao-g-f-fc-cf-c'].value_counts()
-        position_names = {1: '1 - Guard', 2: '2 - Forward', 3: '3 - Center', 4: '4 - Forward-Center', 5: '5 - Center-Forward'}
+        position_names = {1: '1 - Guard', 2: '2 - Forward', 3: '3 - Forward-Center', 4: '4 - Center-Forward', 5: '5 - Center'}
         
-        pos_labels = [position_names.get(pos, f"Posição {pos}") for pos in pos_counts.index]
+        ordered_positions = sorted([pos for pos in pos_counts.index if pos in position_names.keys()])
+        ordered_values = [pos_counts[pos] for pos in ordered_positions]
+        ordered_labels = [position_names[pos] for pos in ordered_positions]
         
         fig = px.pie(
-            values=pos_counts.values,
-            names=pos_labels,
+            values=ordered_values,
+            names=ordered_labels,
             title="Distribuição de Jogadores por Posição",
             color_discrete_sequence=px.colors.qualitative.Set3
         )
@@ -235,6 +237,11 @@ def player_analysis(players_df):
             'assistencias_media': 'mean',
             'porcentagem-arremessos_media': 'mean'
         }).round(2)
+
+        pos_stats = pos_stats.sort_index()
+        position_labels = {1: '1 - Guard', 2: '2 - Forward', 3: '3 - Forward-Center', 4: '4 - Center-Forward', 5: '5 - Center'}
+        pos_stats.index = [position_labels.get(pos, f"Posição {pos}") for pos in pos_stats.index]
+        pos_stats.index.name = 'Posição'  
 
         st.write("**Médias por Posição:**")
         st.dataframe(pos_stats, use_container_width=True)
@@ -440,12 +447,12 @@ def interactive_analysis(players_df, games_df):
         "Minutos mínimos totais",
         min_value=0,
         max_value=int(players_df['minutos_total'].max()),
-        value=100,
+        value=500,
         step=50
     )
     
-    positions = players_df['posicao-g-f-fc-cf-c'].unique()
-    position_names = {1: 'G', 2: 'F', 3: 'C', 4: 'FC', 5: 'CF'}
+    positions = sorted(players_df['posicao-g-f-fc-cf-c'].unique())
+    position_names = {1: 'G', 2: 'F', 3: 'FC', 4: 'CF', 5: 'C'}
     selected_positions = st.sidebar.multiselect(
         "Posições", 
         options=positions,
@@ -500,7 +507,14 @@ def interactive_analysis(players_df, games_df):
                        'pontos_media', 'rebotes-totais_media', 'assistencias_media', 'porcentagem-arremessos_media']
 
         available_cols = [col for col in display_cols if col in filtered_players.columns]
-        st.dataframe(filtered_players[available_cols].round(2), use_container_width=True)
+        
+        display_df = filtered_players[available_cols].copy().round(2)
+        
+        if 'posicao-g-f-fc-cf-c' in display_df.columns:
+            position_labels = {1: '1 - Guard', 2: '2 - Forward', 3: '3 - Forward-Center', 4: '4 - Center-Forward', 5: '5 - Center'}
+            display_df['posicao-g-f-fc-cf-c'] = display_df['posicao-g-f-fc-cf-c'].map(position_labels)
+        
+        st.dataframe(display_df, use_container_width=True)
     else:
         st.warning("Nenhum jogador atende aos critérios selecionados.")
 
@@ -1040,7 +1054,7 @@ def player_specific_predictions(players_df):
     with col1:
         player_options = {}
         for idx, row in active_players.iterrows():
-            pos_name = {1: 'Guard', 2: 'Forward', 3: 'Center', 4: 'Forward-Center', 5: 'Center-Forward'}
+            pos_name = {1: 'Guard', 2: 'Forward', 3: 'Forward-Center', 4: 'Center-Forward', 5: 'Center'}
             position = pos_name.get(row['posicao-g-f-fc-cf-c'], f"Pos-{row['posicao-g-f-fc-cf-c']}")
             
             if 'nome-jogador' in row and pd.notna(row['nome-jogador']) and row['nome-jogador'].strip():
@@ -1101,7 +1115,7 @@ def player_specific_predictions(players_df):
         
         st.write("**Informações do Jogador:**")
         player_info_df = pd.DataFrame({
-            'Estatística': [
+            'Variável': [
                 'Nome',
                 'Posição', 
                 'Idade',
@@ -1114,7 +1128,7 @@ def player_specific_predictions(players_df):
             ],
             'Valor': [
                 player_data.get('nome-jogador', 'N/A') if pd.notna(player_data.get('nome-jogador')) else 'N/A',
-                {1: 'Guard', 2: 'Forward', 3: 'Center', 4: 'Forward-Center', 5: 'Center-Forward'}.get(player_data['posicao-g-f-fc-cf-c'], 'N/A'),
+                {1: 'Guard', 2: 'Forward', 3: 'Forward-Center', 4: 'Center-Forward', 5: 'Center'}.get(player_data['posicao-g-f-fc-cf-c'], 'N/A'),
                 f"{player_data['idade']} anos",
                 f"{player_data['jogos-disputados_total']} jogos",
                 f"{player_data['minutos_media']:.1f} min",
@@ -2029,10 +2043,8 @@ def logistic_regression_theory_view(games_df):
 
     df = games_df.copy()
 
-    # Remover colunas não numéricas
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
-    # Remover colunas que podem causar leakage ou não fazem sentido
     cols_to_exclude = ['data-jogo']
     available_cols = [col for col in numeric_cols if col not in cols_to_exclude]
 
@@ -2048,7 +2060,6 @@ def logistic_regression_theory_view(games_df):
         Para variáveis contínuas, será criada uma classificação binária baseada em um limiar.
         """)
 
-        # Opções de variável Y
         target_options = {
             'resultado': 'Resultado do Jogo (Vitória/Derrota)',
             'pontos': 'Pontos (Alto/Baixo)',
@@ -2063,10 +2074,10 @@ def logistic_regression_theory_view(games_df):
         target_var = st.selectbox(
             "Selecione a Variável Y:",
             options=list(available_targets.keys()),
-            format_func=lambda x: available_targets[x]
+            format_func=lambda x: available_targets[x],
+            key="logistic_target_var"
         )
 
-        # Se não for 'resultado', pedir limiar
         if target_var != 'resultado':
             min_val = float(df[target_var].min())
             max_val = float(df[target_var].max())
@@ -2077,7 +2088,8 @@ def logistic_regression_theory_view(games_df):
                 min_value=min_val,
                 max_value=max_val,
                 value=mean_val,
-                help=f"Valores acima do limiar serão classificados como 1 (Alto), abaixo como 0 (Baixo)"
+                help=f"Valores acima do limiar serão classificados como 1 (Alto), abaixo como 0 (Baixo)",
+                key=f"logistic_threshold_{target_var}"
             )
             df['target'] = (df[target_var] > threshold).astype(int)
         else:
@@ -2091,10 +2103,8 @@ def logistic_regression_theory_view(games_df):
         Selecione uma ou mais variáveis da base de dados.
         """)
 
-        # Variáveis disponíveis para X (excluir a target)
         available_features = [col for col in available_cols if col != target_var]
 
-        # Nomes mais amigáveis
         feature_labels = {
             'arremessos-tentados': 'Arremessos Tentados',
             'arremessos-convertidos': 'Arremessos Convertidos',
@@ -2122,7 +2132,8 @@ def logistic_regression_theory_view(games_df):
             "Selecione as Variáveis X:",
             options=available_features,
             default=available_features[:4] if len(available_features) >= 4 else available_features,
-            format_func=lambda x: feature_labels.get(x, x)
+            format_func=lambda x: feature_labels.get(x, x),
+            key="logistic_selected_features"
         )
 
     if not selected_features:
@@ -2133,7 +2144,18 @@ def logistic_regression_theory_view(games_df):
 
     # --- TREINAR MODELO ---
     try:
-        # Preparar dados
+        if 'target' not in df.columns:
+            if target_var == 'resultado':
+                df['target'] = df['resultado']
+            else:
+                min_val = float(df[target_var].min())
+                max_val = float(df[target_var].max())
+                mean_val = float(df[target_var].mean())
+                threshold = mean_val  # usar média como padrão
+                df['target'] = (df[target_var] > threshold).astype(int)
+        
+        st.info(f"🔍 Debug: Variável target criada com {df['target'].sum()} valores classe 1 de {len(df)} total")
+        
         X = df[selected_features].dropna()
         y = df.loc[X.index, 'target']
 
@@ -2141,24 +2163,19 @@ def logistic_regression_theory_view(games_df):
             st.warning("⚠️ Dados insuficientes para treinar o modelo. Selecione outras variáveis.")
             return
 
-        # Normalizar dados
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
 
-        # Dividir em treino e teste
         X_train, X_test, y_train, y_test = train_test_split(
             X_scaled, y, test_size=0.3, random_state=42
         )
 
-        # Treinar modelo
         model = LogisticRegression(max_iter=1000, random_state=42)
         model.fit(X_train, y_train)
 
-        # Fazer predições
         y_pred = model.predict(X_test)
         y_pred_proba = model.predict_proba(X_test)
 
-        # Calcular métricas
         accuracy = accuracy_score(y_test, y_pred)
         cm = confusion_matrix(y_test, y_pred)
 
@@ -2183,7 +2200,6 @@ def logistic_regression_theory_view(games_df):
             class_0_count = len(y) - class_1_count
             st.metric("Classe 0 (Baixo/Derrota)", f"{class_0_count}")
 
-        # Coeficientes
         st.markdown("### 🔢 Equação do Modelo")
 
         col1, col2 = st.columns([1, 1])
@@ -2211,10 +2227,8 @@ def logistic_regression_theory_view(games_df):
             fig_coef.update_layout(height=400, showlegend=False)
             st.plotly_chart(fig_coef, use_container_width=True)
 
-        # Equação
         st.markdown("**Equação Completa:**")
 
-        # Criar equação com quebras de linha para variáveis longas
         equation_text = f"**z** = {model.intercept_[0]:.4f}"
         for i, feature in enumerate(selected_features):
             coef = model.coef_[0][i]
@@ -2225,25 +2239,20 @@ def logistic_regression_theory_view(games_df):
         st.markdown(equation_text)
         st.markdown("**p(Classe 1)** = 1 / [1 + e^(-z)]")
 
-        # --- EXEMPLO DE CÁLCULO ---
         st.markdown("---")
         st.markdown("**📝 Exemplo de Cálculo:**")
 
-        # Pegar um exemplo real dos dados de teste
         if len(X_test) > 0:
             example_idx = 0
             example_values = X.iloc[example_idx]
             example_scaled = scaler.transform([example_values.values])[0]
 
-            # Calcular z manualmente
             z_value = model.intercept_[0]
             for i, feature in enumerate(selected_features):
                 z_value += model.coef_[0][i] * example_scaled[i]
 
-            # Calcular p
             p_value = 1 / (1 + np.exp(-z_value))
 
-            # Mostrar valores originais
             st.markdown("Para os seguintes valores:")
             values_text = ""
             for feature in selected_features:
@@ -2251,7 +2260,6 @@ def logistic_regression_theory_view(games_df):
                 values_text += f"- **{feature_name}**: {example_values[feature]:.2f}\n"
             st.markdown(values_text)
 
-            # Mostrar cálculo
             st.markdown(f"Calculamos **z** = {z_value:.4f}")
             st.markdown(f"E então **p(Classe 1)** = 1 / [1 + e^(-{z_value:.4f})] = **{p_value:.4f}** ({p_value*100:.2f}%)")
 
@@ -2280,12 +2288,11 @@ def logistic_regression_theory_view(games_df):
                     min_value=min_val,
                     max_value=max_val,
                     value=mean_val,
-                    key=f"pred_{feature}",
+                    key=f"logistic_pred_{feature}",
                     help=f"Média: {mean_val:.2f}"
                 )
 
-        if st.button("🔮 Calcular Probabilidade", type="primary"):
-            # Fazer predição
+        if st.button("🔮 Calcular Probabilidade", type="primary", key="logistic_calculate_probability"):
             pred_input = np.array([list(prediction_values.values())])
             pred_input_scaled = scaler.transform(pred_input)
 
@@ -2295,7 +2302,6 @@ def logistic_regression_theory_view(games_df):
             prob_class_0 = probability[0]
             prob_class_1 = probability[1]
 
-            # Exibir resultado
             st.markdown("---")
             st.markdown("### 📈 Resultado da Predição")
 
@@ -2359,9 +2365,16 @@ def logistic_regression_theory_view(games_df):
             fig_prob.update_layout(height=400)
             st.plotly_chart(fig_prob, use_container_width=True)
 
+    except KeyError as ke:
+        st.error(f"Erro: Coluna não encontrada - {ke}")
+        st.info("Verifique se todas as variáveis selecionadas existem nos dados.")
+    except ValueError as ve:
+        st.error(f"Erro de valor: {ve}")
+        st.info("Verifique se os dados são válidos para o modelo.")
     except Exception as e:
-        st.error(f"Erro ao treinar o modelo: {e}")
-        st.exception(e)
+        st.error(f"Erro inesperado ao treinar o modelo: {e}")
+        st.info("Tente selecionar outras variáveis ou verifique os dados.")
+
 
 def main():
     """Função principal da aplicação"""
