@@ -480,11 +480,11 @@ def interactive_analysis(players_df, games_df):
             'tocos_media': 'Tocos por Jogo'
         }
 
-        x_stat = st.selectbox("Estatística X", options=list(stat_options.keys()),
+        x_stat = st.selectbox("Variável Independente X", options=list(stat_options.keys()),
                              format_func=lambda x: stat_options[x])
 
     with col2:
-        y_stat = st.selectbox("Estatística Y", options=list(stat_options.keys()),
+        y_stat = st.selectbox("Variável Dependente Y", options=list(stat_options.keys()),
                              format_func=lambda x: stat_options[x], index=1)
     
     if not filtered_players.empty:
